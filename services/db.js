@@ -1,15 +1,27 @@
 const { createClient } = require("@supabase/supabase-js");
 
+// We only use Supabase for database queries — NOT realtime.
+// Disabling realtime avoids the Node.js WebSocket requirement entirely.
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
+  process.env.SUPABASE_SERVICE_KEY,
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    realtime: {
+      // Disable realtime — we don't need live subscriptions
+      params: { eventsPerSecond: 0 },
+    },
+    global: {
+      headers: { "x-application-name": "goojob" },
+    },
+  }
 );
 
 // ─── Jobs Table Helpers ───────────────────────────────────────
 
-/**
- * Search jobs by keyword, location, and type
- */
 async function searchJobs({ query = "", location = "", type = "", remote, page = 1, limit = 20 }) {
   const offset = (page - 1) * limit;
 
@@ -20,7 +32,6 @@ async function searchJobs({ query = "", location = "", type = "", remote, page =
     .range(offset, offset + limit - 1);
 
   if (query) {
-    // Full-text search across title, company, description
     q = q.or(
       `title.ilike.%${query}%,company.ilike.%${query}%,description.ilike.%${query}%`
     );
@@ -35,9 +46,6 @@ async function searchJobs({ query = "", location = "", type = "", remote, page =
   return { jobs: data, total: count, page, limit };
 }
 
-/**
- * Upsert jobs (insert or update by external_id)
- */
 async function upsertJobs(jobs) {
   const { data, error } = await supabase
     .from("jobs")
@@ -46,9 +54,6 @@ async function upsertJobs(jobs) {
   return data;
 }
 
-/**
- * Get a single job by ID
- */
 async function getJobById(id) {
   const { data, error } = await supabase
     .from("jobs")
@@ -59,9 +64,6 @@ async function getJobById(id) {
   return data;
 }
 
-/**
- * Get featured/recent jobs for homepage
- */
 async function getFeaturedJobs(limit = 10) {
   const { data, error } = await supabase
     .from("jobs")
@@ -73,9 +75,6 @@ async function getFeaturedJobs(limit = 10) {
   return data;
 }
 
-/**
- * Log a click/apply event for analytics
- */
 async function logClick(jobId, userIp) {
   await supabase.from("job_clicks").insert({ job_id: jobId, user_ip: userIp });
 }
