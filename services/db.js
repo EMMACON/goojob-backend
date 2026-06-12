@@ -1,82 +1,95 @@
-const { createClient } = require("@supabase/supabase-js");
+const axios = require("axios");
 
-// We only use Supabase for database queries — NOT realtime.
-// Disabling realtime avoids the Node.js WebSocket requirement entirely.
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-    realtime: {
-      // Disable realtime — we don't need live subscriptions
-      params: { eventsPerSecond: 0 },
-    },
-    global: {
-      headers: { "x-application-name": "goojob" },
-    },
-  }
-);
+// ─────────────────────────────────────────────────────────────
+// Direct Supabase REST API client (no @supabase/supabase-js)
+// This avoids ALL the WebSocket / Node version problems because
+// we just make plain HTTPS requests to Supabase's REST endpoint.
+// ─────────────────────────────────────────────────────────────
 
-// ─── Jobs Table Helpers ───────────────────────────────────────
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const REST = `${SUPABASE_URL}/rest/v1`;
 
+const headers = {
+  apikey: SERVICE_KEY,
+  Authorization: `Bearer ${SERVICE_KEY}`,
+  "Content-Type": "application/json",
+};
+
+// ─── Search jobs ──────────────────────────────────────────────
 async function searchJobs({ query = "", location = "", type = "", remote, page = 1, limit = 20 }) {
   const offset = (page - 1) * limit;
 
-  let q = supabase
-    .from("jobs")
-    .select("*", { count: "exact" })
-    .order("posted_at", { ascending: false })
-    .range(offset, offset + limit - 1);
+  // Build PostgREST query params
+  const params = new URLSearchParams();
+  params.set("select", "*");
+  params.set("order", "posted_at.desc");
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
 
   if (query) {
-    q = q.or(
-      `title.ilike.%${query}%,company.ilike.%${query}%,description.ilike.%${query}%`
-    );
+    // OR across title, company, description
+    params.set("or", `(title.ilike.*${query}*,company.ilike.*${query}*,description.ilike.*${query}*)`);
   }
-  if (location) q = q.ilike("location", `%${location}%`);
-  if (type) q = q.eq("type", type);
-  if (remote !== undefined) q = q.eq("remote", remote);
+  if (location) params.append("location", `ilike.*${location}*`);
+  if (type) params.append("type", `eq.${type}`);
+  if (remote !== undefined) params.append("remote", `eq.${remote}`);
 
-  const { data, error, count } = await q;
-  if (error) throw error;
+  const res = await axios.get(`${REST}/jobs?${params.toString()}`, {
+    headers: { ...headers, Prefer: "count=exact" },
+    timeout: 10000,
+  });
 
-  return { jobs: data, total: count, page, limit };
+  // Total count comes back in the content-range header
+  const range = res.headers["content-range"] || "";
+  const total = range.includes("/") ? parseInt(range.split("/")[1], 10) : res.data.length;
+
+  return { jobs: res.data, total: isNaN(total) ? res.data.length : total, page, limit };
 }
 
+// ─── Upsert jobs ──────────────────────────────────────────────
 async function upsertJobs(jobs) {
-  const { data, error } = await supabase
-    .from("jobs")
-    .upsert(jobs, { onConflict: "external_id" });
-  if (error) throw error;
-  return data;
+  if (!jobs || jobs.length === 0) return [];
+  const res = await axios.post(
+    `${REST}/jobs?on_conflict=external_id`,
+    jobs,
+    {
+      headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
+      timeout: 15000,
+    }
+  );
+  return res.data;
 }
 
+// ─── Get one job ──────────────────────────────────────────────
 async function getJobById(id) {
-  const { data, error } = await supabase
-    .from("jobs")
-    .select("*")
-    .eq("id", id)
-    .single();
-  if (error) throw error;
-  return data;
+  const res = await axios.get(`${REST}/jobs?id=eq.${id}&select=*`, {
+    headers,
+    timeout: 8000,
+  });
+  return res.data[0] || null;
 }
 
+// ─── Featured jobs ────────────────────────────────────────────
 async function getFeaturedJobs(limit = 10) {
-  const { data, error } = await supabase
-    .from("jobs")
-    .select("*")
-    .eq("featured", true)
-    .order("posted_at", { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return data;
+  const res = await axios.get(
+    `${REST}/jobs?featured=eq.true&order=posted_at.desc&limit=${limit}&select=*`,
+    { headers, timeout: 8000 }
+  );
+  return res.data;
 }
 
+// ─── Log click ────────────────────────────────────────────────
 async function logClick(jobId, userIp) {
-  await supabase.from("job_clicks").insert({ job_id: jobId, user_ip: userIp });
+  try {
+    await axios.post(
+      `${REST}/job_clicks`,
+      { job_id: jobId, user_ip: userIp },
+      { headers: { ...headers, Prefer: "return=minimal" }, timeout: 5000 }
+    );
+  } catch (e) {
+    // non-critical, ignore
+  }
 }
 
-module.exports = { supabase, searchJobs, upsertJobs, getJobById, getFeaturedJobs, logClick };
+module.exports = { searchJobs, upsertJobs, getJobById, getFeaturedJobs, logClick };
