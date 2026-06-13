@@ -1,19 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const { searchJobs, getJobById, getFeaturedJobs, logClick } = require("../services/db");
-const { searchJSearchAPI } = require("../services/jsearch");
-const { upsertJobs } = require("../services/db");
 
 /**
  * GET /api/jobs/search
- * Main search endpoint — checks DB first, falls back to JSearch API
+ * Searches ONLY our crawled jobs (Greenhouse/Lever/Ashby).
+ * Every result is a direct company job link — no middlemen, no job boards.
  *
- * Query params:
- *   q        - search keyword (required)
- *   location - city/country filter
- *   type     - Full-time | Part-time | Contract | Internship
- *   remote   - true | false
- *   page     - page number (default 1)
+ * Query params: q, location, type, remote, page
  */
 router.get("/search", async (req, res) => {
   try {
@@ -25,8 +19,7 @@ router.get("/search", async (req, res) => {
 
     const remoteFilter = remote === "true" ? true : remote === "false" ? false : undefined;
 
-    // 1. Check our Supabase DB first (crawled + cached results)
-    const dbResults = await searchJobs({
+    const results = await searchJobs({
       query: q,
       location,
       type,
@@ -35,33 +28,7 @@ router.get("/search", async (req, res) => {
       limit: 20,
     });
 
-    // 2. If DB has enough results, return them
-    if (dbResults.total >= 10) {
-      return res.json({ ...dbResults, source: "db" });
-    }
-
-    // 3. Otherwise, hit JSearch API for fresh results
-    const apiJobs = await searchJSearchAPI({
-      query: q,
-      location,
-      remote: remoteFilter,
-      page: Number(page),
-    });
-
-    // 4. Cache API results in Supabase for next time
-    if (apiJobs.length) {
-      await upsertJobs(apiJobs).catch((e) =>
-        console.warn("[CACHE] Failed to cache jobs:", e.message)
-      );
-    }
-
-    return res.json({
-      jobs: apiJobs,
-      total: apiJobs.length,
-      page: Number(page),
-      limit: 20,
-      source: "api",
-    });
+    return res.json({ ...results, source: "db" });
   } catch (err) {
     console.error("[/search]", err.message);
     res.status(500).json({ error: "Search failed. Please try again." });
@@ -70,7 +37,6 @@ router.get("/search", async (req, res) => {
 
 /**
  * GET /api/jobs/featured
- * Returns featured/recent jobs for the homepage
  */
 router.get("/featured", async (req, res) => {
   try {
@@ -84,7 +50,6 @@ router.get("/featured", async (req, res) => {
 
 /**
  * GET /api/jobs/:id
- * Single job detail
  */
 router.get("/:id", async (req, res) => {
   try {
@@ -98,7 +63,6 @@ router.get("/:id", async (req, res) => {
 
 /**
  * POST /api/jobs/:id/click
- * Track when a user clicks "Apply" (for analytics only — no redirect)
  */
 router.post("/:id/click", async (req, res) => {
   try {
