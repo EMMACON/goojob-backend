@@ -29,9 +29,30 @@ function fresh(entry) {
 
 function matchesQuery(job, q) {
   if (!q) return true;
-  const hay = `${job.title} ${job.company} ${job.description} ${(job.tags || []).join(" ")}`.toLowerCase();
-  // match if ANY query word appears
-  return q.toLowerCase().split(/\s+/).filter(Boolean).some((w) => hay.includes(w));
+  const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  if (words.length === 0) return true;
+
+  const title = (job.title || "").toLowerCase();
+  const tags = (job.tags || []).join(" ").toLowerCase();
+  const company = (job.company || "").toLowerCase();
+  const body = (job.description || "").toLowerCase();
+
+  // Relevance scoring: a match in the TITLE matters far more than the
+  // description. We require the job to clear a threshold so loosely
+  // related jobs (e.g. "Director" matching "video editor") drop out.
+  let score = 0;
+  for (const w of words) {
+    if (title.includes(w)) score += 3;        // title hit = strong
+    else if (tags.includes(w)) score += 2;    // tag hit = good
+    else if (company.includes(w)) score += 1; // company hit = weak
+    else if (body.includes(w)) score += 0.5;  // body-only = very weak
+  }
+
+  // Require at least one strong/medium signal, OR most words present.
+  // Threshold scales with how many words the user typed.
+  const titleHits = words.filter((w) => title.includes(w)).length;
+  const needed = Math.max(2, words.length * 1.5);
+  return titleHits >= 1 && score >= needed;
 }
 
 // ─── Remotive ─────────────────────────────────────────────────
@@ -129,7 +150,7 @@ async function loadArbeitnow() {
  * Search all three remote sources for a query.
  * Returns a combined, de-duplicated list (tagged source_type set by caller).
  */
-async function searchRemoteSources({ query = "", remote, limit = 15 }) {
+async function searchRemoteSources({ query = "", remote, limit = 25, page = 1, offset = 0 }) {
   const [a, b, c] = await Promise.all([loadRemotive(), loadRemoteOK(), loadArbeitnow()]);
   let all = [...a, ...b, ...c];
 
@@ -146,7 +167,9 @@ async function searchRemoteSources({ query = "", remote, limit = 15 }) {
     if (!seen.has(key)) { seen.add(key); deduped.push(j); }
   }
 
-  return { jobs: deduped.slice(0, limit), total: deduped.length };
+  // Pagination: slice the requested window out of the full matched set
+  const start = offset || (page - 1) * limit;
+  return { jobs: deduped.slice(start, start + limit), total: deduped.length };
 }
 
 module.exports = { searchRemoteSources };
