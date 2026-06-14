@@ -6,19 +6,19 @@ const { searchRemoteSources } = require("../services/remote-sources");
 const { resolveBatch } = require("../services/link-resolver");
 
 // ─── Tuning ───────────────────────────────────────────────────
-// Adzuna ONLY fills gaps. If we already have plenty of direct jobs,
-// we don't call Adzuna at all. When we do, we cap how many show so
-// it can never bury your direct (badged) jobs.
-const DIRECT_ENOUGH = 8;   // if direct results >= this, skip Adzuna entirely
-const ADZUNA_MAX = 6;      // never show more than this many Adzuna jobs
+const PAGE_SIZE = 25;       // jobs shown per page
+const DIRECT_ENOUGH = PAGE_SIZE; // if direct fills the page, skip gap-fill
 
 /**
- * GET /api/jobs/search
+ * GET /api/jobs/search?q=...&page=1
  *
- * 1. Search OUR crawled jobs first (direct company links) — always priority.
- * 2. ONLY if direct results are thin (< DIRECT_ENOUGH), top up with a
- *    capped number of Adzuna jobs (badged "Via Adzuna"), biased to remote
- *    since the audience is global. Direct jobs always shown first.
+ * Paginated. Each page returns up to PAGE_SIZE jobs:
+ *   1. OUR direct crawled jobs first (always priority, badged Direct)
+ *   2. If the page isn't full, top up with remote-native sources
+ *      (Remotive/RemoteOK/Arbeitnow), then Adzuna as last resort.
+ *   3. Gap-fill jobs are run through the resolver to upgrade them to
+ *      real direct company links where possible.
+ * Returns `hasMore` so the frontend can show a "Load more" button.
  */
 router.get("/search", async (req, res) => {
   try {
@@ -29,35 +29,45 @@ router.get("/search", async (req, res) => {
     }
 
     const remoteFilter = remote === "true" ? true : remote === "false" ? false : undefined;
-    const pageNum = Number(page) || 1;
+    const pageNum = Math.max(1, Number(page) || 1);
 
-    // 1) Our direct crawled jobs (priority)
+    // 1) Our direct crawled jobs for this page
     const direct = await searchJobs({
       query: q,
       location,
       type,
       remote: remoteFilter,
       page: pageNum,
-      limit: 20,
+      limit: PAGE_SIZE,
     });
 
     let directJobs = (direct.jobs || []).map((j) => ({ ...j, source_type: "direct" }));
+    const directTotal = direct.total || 0;
 
-    // 2) Gap-fill — ONLY when direct results are thin.
-    //    Order of preference: remote-native sources (lean direct) FIRST,
-    //    then Adzuna as the last-resort filler. All capped & deduped.
+    // 2) Gap-fill if this page isn't full of direct jobs
     let aggregatorJobs = [];
-    const needsTopUp = directJobs.length < DIRECT_ENOUGH;
+    let aggregatorTotal = 0;
+    const slotsLeft = PAGE_SIZE - directJobs.length;
 
-    if (needsTopUp) {
-      const remoteWanted = remoteFilter === false ? false : true;
+    if (slotsLeft > 0) {
       const seen = new Set(
         directJobs.map((j) => `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`)
       );
 
-      // 2a) Remote-native sources first (Remotive, RemoteOK, Arbeitnow)
+      // Offset gap-fill by how many direct jobs exist beyond this page,
+      // so paging through doesn't repeat the same filler jobs.
+      const directPagesConsumed = directTotal; // total direct across all pages
+      const fillOffset = Math.max(0, (pageNum - 1) * PAGE_SIZE - directPagesConsumed);
+
+      // 2a) Remote-native sources first
       try {
-        const remoteRes = await searchRemoteSources({ query: q, remote: remoteFilter, limit: 15 });
+        const remoteRes = await searchRemoteSources({
+          query: q,
+          remote: remoteFilter,
+          limit: slotsLeft,
+          offset: fillOffset,
+        });
+        aggregatorTotal += remoteRes.total || 0;
         for (const j of remoteRes.jobs) {
           const key = `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`;
           if (!seen.has(key)) {
@@ -69,10 +79,11 @@ router.get("/search", async (req, res) => {
         console.error("[remote-sources]", e.message);
       }
 
-      // 2b) Adzuna only if we STILL need more after remote sources
-      if (adzunaReady() && directJobs.length + aggregatorJobs.length < DIRECT_ENOUGH) {
-        const adzRemote = remoteWanted;
-        const adz = await searchAdzuna({ query: q, remote: adzRemote, page: pageNum, limit: 20 });
+      // 2b) Adzuna only if still room
+      if (adzunaReady() && aggregatorJobs.length < slotsLeft) {
+        const adzRemote = remoteFilter === false ? false : true;
+        const adz = await searchAdzuna({ query: q, remote: adzRemote, page: pageNum, limit: PAGE_SIZE });
+        aggregatorTotal += adz.total || 0;
         for (const j of (adz.jobs || [])) {
           const key = `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`;
           if (!seen.has(key)) {
@@ -82,27 +93,31 @@ router.get("/search", async (req, res) => {
         }
       }
 
-      // Cap total filler, then try to UPGRADE each to a real direct link
-      aggregatorJobs = aggregatorJobs.slice(0, ADZUNA_MAX);
+      // Trim to remaining slots, then upgrade to direct links where possible
+      aggregatorJobs = aggregatorJobs.slice(0, slotsLeft);
       aggregatorJobs = await resolveBatch(aggregatorJobs);
     }
 
-    // After resolution, some aggregator jobs may have been upgraded to
-    // "direct". Re-split so ALL direct jobs (crawled + upgraded) come
-    // first, and only genuine Adzuna jobs are badged as aggregator.
+    // Re-split so upgraded-to-direct jobs join the direct group
     const upgradedDirect = aggregatorJobs.filter((j) => j.source_type === "direct");
     const stillAggregator = aggregatorJobs.filter((j) => j.source_type === "aggregator");
-
     const jobs = [...directJobs, ...upgradedDirect, ...stillAggregator];
+
+    // hasMore: are there more pages available from any source?
+    const grandTotal = directTotal + aggregatorTotal;
+    const seenSoFar = pageNum * PAGE_SIZE;
+    const hasMore = jobs.length === PAGE_SIZE && seenSoFar < grandTotal;
 
     return res.json({
       jobs,
-      total: (direct.total || 0) + stillAggregator.length,
+      total: grandTotal,
+      page: pageNum,
+      pageSize: PAGE_SIZE,
+      hasMore,
       directCount: directJobs.length + upgradedDirect.length,
       aggregatorCount: stillAggregator.length,
       upgradedCount: upgradedDirect.length,
-      page: pageNum,
-      source: stillAggregator.length || upgradedDirect.length ? "direct+adzuna" : "direct",
+      source: stillAggregator.length || upgradedDirect.length ? "direct+filled" : "direct",
     });
   } catch (err) {
     console.error("[/search]", err.message);
