@@ -96,17 +96,23 @@ router.get("/search", async (req, res) => {
       // Trim to remaining slots, then upgrade to direct links where possible
       aggregatorJobs = aggregatorJobs.slice(0, slotsLeft);
       aggregatorJobs = await resolveBatch(aggregatorJobs);
+
+      // DIRECT-ONLY POLICY: keep ONLY jobs that resolved to a real
+      // company link. Anything still pointing at an aggregator
+      // (Adzuna/Remotive/etc.) is dropped — we never show middleman
+      // links. This guarantees every job on the site is direct.
+      aggregatorJobs = aggregatorJobs.filter((j) => j.source_type === "direct");
     }
 
-    // Re-split so upgraded-to-direct jobs join the direct group
-    const upgradedDirect = aggregatorJobs.filter((j) => j.source_type === "direct");
-    const stillAggregator = aggregatorJobs.filter((j) => j.source_type === "aggregator");
-    const jobs = [...directJobs, ...upgradedDirect, ...stillAggregator];
+    // Everything that survives is now a direct link (crawled OR
+    // resolved-from-aggregator). They all get the "direct" treatment.
+    const upgradedDirect = aggregatorJobs; // already filtered to direct only
+    const jobs = [...directJobs, ...upgradedDirect];
 
-    // hasMore: are there more pages available from any source?
+    // hasMore: are there more pages available?
     const grandTotal = directTotal + aggregatorTotal;
     const seenSoFar = pageNum * PAGE_SIZE;
-    const hasMore = jobs.length === PAGE_SIZE && seenSoFar < grandTotal;
+    const hasMore = jobs.length >= PAGE_SIZE && seenSoFar < grandTotal;
 
     return res.json({
       jobs,
@@ -114,10 +120,10 @@ router.get("/search", async (req, res) => {
       page: pageNum,
       pageSize: PAGE_SIZE,
       hasMore,
-      directCount: directJobs.length + upgradedDirect.length,
-      aggregatorCount: stillAggregator.length,
+      directCount: jobs.length,
+      aggregatorCount: 0,
       upgradedCount: upgradedDirect.length,
-      source: stillAggregator.length || upgradedDirect.length ? "direct+filled" : "direct",
+      source: "direct",
     });
   } catch (err) {
     console.error("[/search]", err.message);
