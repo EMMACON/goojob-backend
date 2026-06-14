@@ -2,16 +2,23 @@ const express = require("express");
 const router = express.Router();
 const { searchJobs, getJobById, getFeaturedJobs, logClick } = require("../services/db");
 const { searchAdzuna, isConfigured: adzunaReady } = require("../services/adzuna");
+const { searchRemoteSources } = require("../services/remote-sources");
+const { resolveBatch } = require("../services/link-resolver");
+
+// ─── Tuning ───────────────────────────────────────────────────
+// Adzuna ONLY fills gaps. If we already have plenty of direct jobs,
+// we don't call Adzuna at all. When we do, we cap how many show so
+// it can never bury your direct (badged) jobs.
+const DIRECT_ENOUGH = 8;   // if direct results >= this, skip Adzuna entirely
+const ADZUNA_MAX = 6;      // never show more than this many Adzuna jobs
 
 /**
  * GET /api/jobs/search
  *
- * Strategy:
- *   1. Always search OUR crawled jobs first (direct company links).
- *      These are prioritized and badged "Direct" on the frontend.
- *   2. Then top up with Adzuna aggregator results (broad sector
- *      coverage) badged "Via Adzuna", so sectors like video editing
- *      aren't empty. Deduped and always shown AFTER direct jobs.
+ * 1. Search OUR crawled jobs first (direct company links) — always priority.
+ * 2. ONLY if direct results are thin (< DIRECT_ENOUGH), top up with a
+ *    capped number of Adzuna jobs (badged "Via Adzuna"), biased to remote
+ *    since the audience is global. Direct jobs always shown first.
  */
 router.get("/search", async (req, res) => {
   try {
@@ -36,39 +43,66 @@ router.get("/search", async (req, res) => {
 
     let directJobs = (direct.jobs || []).map((j) => ({ ...j, source_type: "direct" }));
 
-    // 2) Adzuna top-up (only if configured). We fetch broad results
-    //    and append them after the direct jobs.
+    // 2) Gap-fill — ONLY when direct results are thin.
+    //    Order of preference: remote-native sources (lean direct) FIRST,
+    //    then Adzuna as the last-resort filler. All capped & deduped.
     let aggregatorJobs = [];
-    let aggregatorTotal = 0;
-    if (adzunaReady()) {
-      const adz = await searchAdzuna({
-        query: q,
-        remote: remoteFilter,
-        page: pageNum,
-        limit: 20,
-      });
-      aggregatorTotal = adz.total || 0;
+    const needsTopUp = directJobs.length < DIRECT_ENOUGH;
 
-      // Dedupe: drop aggregator jobs whose title+company already
-      // appear in our direct results (case-insensitive).
+    if (needsTopUp) {
+      const remoteWanted = remoteFilter === false ? false : true;
       const seen = new Set(
         directJobs.map((j) => `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`)
       );
-      aggregatorJobs = (adz.jobs || [])
-        .filter((j) => !seen.has(`${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`))
-        .map((j) => ({ ...j, source_type: "aggregator" }));
+
+      // 2a) Remote-native sources first (Remotive, RemoteOK, Arbeitnow)
+      try {
+        const remoteRes = await searchRemoteSources({ query: q, remote: remoteFilter, limit: 15 });
+        for (const j of remoteRes.jobs) {
+          const key = `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            aggregatorJobs.push({ ...j, source_type: "aggregator" });
+          }
+        }
+      } catch (e) {
+        console.error("[remote-sources]", e.message);
+      }
+
+      // 2b) Adzuna only if we STILL need more after remote sources
+      if (adzunaReady() && directJobs.length + aggregatorJobs.length < DIRECT_ENOUGH) {
+        const adzRemote = remoteWanted;
+        const adz = await searchAdzuna({ query: q, remote: adzRemote, page: pageNum, limit: 20 });
+        for (const j of (adz.jobs || [])) {
+          const key = `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            aggregatorJobs.push({ ...j, source_type: "aggregator" });
+          }
+        }
+      }
+
+      // Cap total filler, then try to UPGRADE each to a real direct link
+      aggregatorJobs = aggregatorJobs.slice(0, ADZUNA_MAX);
+      aggregatorJobs = await resolveBatch(aggregatorJobs);
     }
 
-    // Direct jobs always first, aggregator fills the rest
-    const jobs = [...directJobs, ...aggregatorJobs];
+    // After resolution, some aggregator jobs may have been upgraded to
+    // "direct". Re-split so ALL direct jobs (crawled + upgraded) come
+    // first, and only genuine Adzuna jobs are badged as aggregator.
+    const upgradedDirect = aggregatorJobs.filter((j) => j.source_type === "direct");
+    const stillAggregator = aggregatorJobs.filter((j) => j.source_type === "aggregator");
+
+    const jobs = [...directJobs, ...upgradedDirect, ...stillAggregator];
 
     return res.json({
       jobs,
-      total: (direct.total || 0) + aggregatorTotal,
-      directCount: directJobs.length,
-      aggregatorCount: aggregatorJobs.length,
+      total: (direct.total || 0) + stillAggregator.length,
+      directCount: directJobs.length + upgradedDirect.length,
+      aggregatorCount: stillAggregator.length,
+      upgradedCount: upgradedDirect.length,
       page: pageNum,
-      source: adzunaReady() ? "direct+adzuna" : "direct",
+      source: stillAggregator.length || upgradedDirect.length ? "direct+adzuna" : "direct",
     });
   } catch (err) {
     console.error("[/search]", err.message);
@@ -94,9 +128,8 @@ router.get("/featured", async (req, res) => {
  */
 router.get("/:id", async (req, res) => {
   try {
-    // Aggregator jobs aren't in our DB; their full data already came
-    // from search. Only look up real DB ids here.
-    if (String(req.params.id).startsWith("adzuna_")) {
+    const id = String(req.params.id);
+    if (/^(adzuna_|remotive_|remoteok_|arbeitnow_)/.test(id)) {
       return res.status(404).json({ error: "External job — apply via its link." });
     }
     const job = await getJobById(req.params.id);
@@ -109,11 +142,11 @@ router.get("/:id", async (req, res) => {
 
 /**
  * POST /api/jobs/:id/click
- * (only logs clicks for our own DB jobs; aggregator clicks are skipped)
  */
 router.post("/:id/click", async (req, res) => {
   try {
-    if (!String(req.params.id).startsWith("adzuna_")) {
+    const id = String(req.params.id);
+    if (!/^(adzuna_|remotive_|remoteok_|arbeitnow_)/.test(id)) {
       const userIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
       await logClick(req.params.id, userIp);
     }
