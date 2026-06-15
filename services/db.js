@@ -52,20 +52,37 @@ function buildSearchTerms(rawQuery) {
 }
 
 // ─── Search jobs ──────────────────────────────────────────────
-// Score a DB job for relevance to the search words (same philosophy
-// as the remote-sources scorer: title hits matter most).
+// Score a DB job for relevance. Title hits dominate; a description-only
+// mention is NOT enough to show the job (that's what was letting
+// "Maintenance Technician" match "video editing").
 function scoreJob(job, words) {
   if (!words.length) return 1;
   const title = (job.title || "").toLowerCase();
   const company = (job.company || "").toLowerCase();
   const body = (job.description || "").toLowerCase();
   let score = 0;
+  let titleHits = 0;
   for (const w of words) {
-    if (title.includes(w)) score += 3;
+    if (title.includes(w)) { score += 3; titleHits += 1; }
     else if (company.includes(w)) score += 1;
-    else if (body.includes(w)) score += 0.5;
+    else if (body.includes(w)) score += 0.3;
   }
+  // REQUIRE at least one query word in the TITLE. No title match = not relevant.
+  if (titleHits === 0) return 0;
   return score;
+}
+
+// Max age for a job to be shown (in days). Older = almost certainly filled.
+const MAX_JOB_AGE_DAYS = 45;
+
+function isFresh(job) {
+  if (!job.posted_at) return true; // unknown date — keep (rare)
+  const posted = new Date(job.posted_at).getTime();
+  if (isNaN(posted)) return true;
+  const ageMs = Date.now() - posted;
+  // guard against future-dated junk too
+  if (ageMs < 0) return true;
+  return ageMs <= MAX_JOB_AGE_DAYS * 24 * 60 * 60 * 1000;
 }
 
 async function searchJobs({ query = "", location = "", type = "", remote, page = 1, limit = 20 }) {
@@ -107,6 +124,7 @@ async function searchJobs({ query = "", location = "", type = "", remote, page =
     ? query.toLowerCase().split(/\s+/).filter((w) => w.length > 2)
     : [];
   const ranked = (res.data || [])
+    .filter(isFresh)   // drop stale jobs (older than MAX_JOB_AGE_DAYS)
     .map((j) => ({ job: j, score: scoreJob(j, scoreWords) }))
     .filter((x) => scoreWords.length === 0 || x.score > 0)
     .sort((a, b) => {
