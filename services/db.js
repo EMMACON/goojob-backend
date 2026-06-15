@@ -76,12 +76,13 @@ function scoreJob(job, words) {
 const MAX_JOB_AGE_DAYS = 45;
 
 function isFresh(job) {
-  if (!job.posted_at) return true; // unknown date — keep (rare)
+  // No date at all? Be safe and EXCLUDE it — we can't confirm it's current,
+  // and stale undated jobs are exactly what we want to avoid showing.
+  if (!job.posted_at) return false;
   const posted = new Date(job.posted_at).getTime();
-  if (isNaN(posted)) return true;
+  if (isNaN(posted)) return false;     // unparseable date — exclude
   const ageMs = Date.now() - posted;
-  // guard against future-dated junk too
-  if (ageMs < 0) return true;
+  if (ageMs < 0) return true;          // future-dated (rare) — allow
   return ageMs <= MAX_JOB_AGE_DAYS * 24 * 60 * 60 * 1000;
 }
 
