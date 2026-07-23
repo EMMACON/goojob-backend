@@ -4,6 +4,7 @@ const { runAshbyCrawler } = require("./ashby");
 const { runWorkableCrawler } = require("./workable");
 const { runSmartRecruitersCrawler } = require("./smartrecruiters");
 const { runRecruiteeCrawler } = require("./recruitee");
+const { runManualSheetCrawler } = require("./manual-sheet");
 
 // ─────────────────────────────────────────────────────────────
 // MASTER CRAWLER ORCHESTRATOR (maxed out for maximum coverage)
@@ -18,7 +19,10 @@ async function runFullCrawl({ onProgress } = {}) {
   const startTime = Date.now();
   const summary = {};
 
-  console.log("\n📋 [1/4] Crawling Ashby...");
+  console.log("\n📋 Reading manual job sheet...");
+  summary.manual = await runManualSheetCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+
+  console.log("\n📋 Crawling Ashby...");
   summary.ashby = await runAshbyCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
 
   console.log("\n📋 [2/4] Crawling Lever...");
@@ -38,6 +42,7 @@ async function runFullCrawl({ onProgress } = {}) {
   summary.greenhouse = await runGreenhouseCrawler({ limit: 100000, onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
 
   const totalJobs =
+    (summary.manual?.totalJobs || 0) +
     (summary.ashby?.totalJobs || 0) +
     (summary.lever?.totalJobs || 0) +
     (summary.workable?.totalJobs || 0) +
@@ -53,12 +58,13 @@ async function runFullCrawl({ onProgress } = {}) {
 
 async function runQuickCrawl() {
   console.log("⚡ [QUICK CRAWL] Lever + Ashby + Workable + SmartRecruiters + Recruitee...");
-  const [lever, ashby, workable, sr, recruitee] = await Promise.allSettled([
+  const [lever, ashby, workable, sr, recruitee, manual] = await Promise.allSettled([
     runLeverCrawler(),
     runAshbyCrawler(),
     runWorkableCrawler(),
     runSmartRecruitersCrawler(),
     runRecruiteeCrawler(),
+    runManualSheetCrawler(),
   ]);
   return {
     lever: lever.value || { error: lever.reason?.message },
@@ -66,6 +72,7 @@ async function runQuickCrawl() {
     workable: workable.value || { error: workable.reason?.message },
     smartrecruiters: sr.value || { error: sr.reason?.message },
     recruitee: recruitee.value || { error: recruitee.reason?.message },
+    manual: manual.value || { error: manual.reason?.message },
   };
 }
 
