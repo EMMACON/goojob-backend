@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { searchJobs, getJobById, getFeaturedJobs, logClick } = require("../services/db");
+const { searchJobs, getJobById, getFeaturedJobs, getRecentJobs, logClick } = require("../services/db");
 const { searchAdzuna, isConfigured: adzunaReady } = require("../services/adzuna");
 const { searchRemoteSources } = require("../services/remote-sources");
 const { resolveBatch } = require("../services/link-resolver");
@@ -131,6 +131,21 @@ router.get("/search", async (req, res) => {
   } catch (err) {
     console.error("[/search]", err.message);
     res.status(500).json({ error: "Search failed. Please try again." });
+  }
+});
+
+/**
+ * GET /api/jobs/recent
+ * Newest fresh jobs across all categories — shown on the homepage
+ * before the user searches anything.
+ */
+router.get("/recent", async (req, res) => {
+  try {
+    const data = await getRecentJobs(24);
+    res.json({ ...data, jobs: (data.jobs || []).map((j) => ({ ...j, source_type: "direct" })) });
+  } catch (err) {
+    console.error("[/recent]", err.message);
+    res.status(500).json({ error: "Could not load recent jobs." });
   }
 });
 
