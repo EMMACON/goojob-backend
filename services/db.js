@@ -55,19 +55,38 @@ function buildSearchTerms(rawQuery) {
 // Score a DB job for relevance. Title hits dominate; a description-only
 // mention is NOT enough to show the job (that's what was letting
 // "Maintenance Technician" match "video editing").
+//
+// Matching is STEM-BASED so near-forms match: searching "editing"
+// also matches "editor"/"edits", "developer" matches "development", etc.
+// We reduce both the query word and the title words to a common root
+// before comparing.
+function stemWord(w) {
+  return String(w).toLowerCase()
+    .replace(/(ing|ers|er|ed|es|ation|ment|ist|ant|ent|s)$/i, "");
+}
+
 function scoreJob(job, words) {
   if (!words.length) return 1;
   const title = (job.title || "").toLowerCase();
   const company = (job.company || "").toLowerCase();
   const body = (job.description || "").toLowerCase();
+
+  // Pre-stem the title words once for forgiving comparison
+  const titleStems = title.split(/[^a-z0-9]+/).map(stemWord).filter(Boolean);
+  const bodyText = body;
+
   let score = 0;
   let titleHits = 0;
   for (const w of words) {
-    if (title.includes(w)) { score += 3; titleHits += 1; }
+    const stem = stemWord(w);
+    const inTitle =
+      title.includes(w) ||                              // exact substring
+      (stem.length >= 3 && titleStems.some((ts) => ts === stem || ts.startsWith(stem) || stem.startsWith(ts)));
+    if (inTitle) { score += 3; titleHits += 1; }
     else if (company.includes(w)) score += 1;
-    else if (body.includes(w)) score += 0.3;
+    else if (bodyText.includes(w) || (stem.length >= 4 && bodyText.includes(stem))) score += 0.3;
   }
-  // REQUIRE at least one query word in the TITLE. No title match = not relevant.
+  // REQUIRE at least one query word (or its stem) in the TITLE.
   if (titleHits === 0) return 0;
   return score;
 }
@@ -188,4 +207,18 @@ async function logClick(jobId, userIp) {
   }
 }
 
-module.exports = { searchJobs, upsertJobs, getJobById, getFeaturedJobs, logClick };
+async function getRecentJobs(limit = 24) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 24, 50));
+  // Pull a pool of newest jobs, filter to fresh ones, return newest first.
+  const res = await axios.get(
+    `${REST}/jobs?order=posted_at.desc&limit=200&select=*`,
+    { headers, timeout: 9000 }
+  );
+  const fresh = (res.data || [])
+    .filter(isFresh)
+    .sort((a, b) => new Date(b.posted_at || 0) - new Date(a.posted_at || 0))
+    .slice(0, safeLimit);
+  return { jobs: fresh, total: fresh.length };
+}
+
+module.exports = { searchJobs, upsertJobs, getJobById, getFeaturedJobs, getRecentJobs, logClick };
