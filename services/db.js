@@ -77,17 +77,22 @@ function scoreJob(job, words) {
 
   let score = 0;
   let titleHits = 0;
+  let companyHits = 0;
   for (const w of words) {
     const stem = stemWord(w);
     const inTitle =
       title.includes(w) ||                              // exact substring
       (stem.length >= 3 && titleStems.some((ts) => ts === stem || ts.startsWith(stem) || stem.startsWith(ts)));
+    const inCompany = company.includes(w);
     if (inTitle) { score += 3; titleHits += 1; }
-    else if (company.includes(w)) score += 1;
+    else if (inCompany) { score += 2.5; companyHits += 1; }  // company match counts strongly
     else if (bodyText.includes(w) || (stem.length >= 4 && bodyText.includes(stem))) score += 0.3;
   }
-  // REQUIRE at least one query word (or its stem) in the TITLE.
-  if (titleHits === 0) return 0;
+  // Relevant if the query hits the TITLE *or* the COMPANY name.
+  // (So searching "paramark" finds all Paramark jobs, and searching
+  //  "editor" still finds editor roles.)
+  if (titleHits === 0 && companyHits === 0) return 0;
+  return score;
   return score;
 }
 
