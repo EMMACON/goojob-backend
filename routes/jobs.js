@@ -22,14 +22,31 @@ const DIRECT_ENOUGH = PAGE_SIZE; // if direct fills the page, skip gap-fill
  */
 router.get("/search", async (req, res) => {
   try {
-    const { q = "", location = "", type = "", remote, page = 1 } = req.query;
+    let { q = "", location = "", type = "", remote, page = 1 } = req.query;
 
     if (!q.trim()) {
       return res.status(400).json({ error: "Search query is required" });
     }
 
-    const remoteFilter = remote === "true" ? true : remote === "false" ? false : undefined;
+    let remoteFilter = remote === "true" ? true : remote === "false" ? false : undefined;
     const pageNum = Math.max(1, Number(page) || 1);
+
+    // ── Work-type words as the WHOLE query ──────────────────────
+    // "Remote" isn't a job title, so a literal keyword search for it
+    // finds nothing even though remote jobs exist. If the entire query
+    // IS a work-type word, treat it as that filter (show ALL jobs of
+    // that type) instead of searching titles for the literal word.
+    const trimmedQ = q.trim().toLowerCase();
+    const workTypeMap = {
+      remote: true, remotely: true, "work from home": true, wfh: true, anywhere: true,
+      onsite: false, "on-site": false, "in office": false, "in-office": false, office: false,
+    };
+    let usedWorkTypeShortcut = false;
+    if (workTypeMap.hasOwnProperty(trimmedQ) && remoteFilter === undefined) {
+      remoteFilter = workTypeMap[trimmedQ];
+      q = "";               // clear the keyword — we want ALL jobs of this type
+      usedWorkTypeShortcut = true;
+    }
 
     // 1) Our direct crawled jobs for this page
     const direct = await searchJobs({
