@@ -24,11 +24,15 @@ router.get("/search", async (req, res) => {
   try {
     let { q = "", location = "", type = "", remote, page = 1 } = req.query;
 
-    if (!q.trim()) {
+    let remoteFilter = remote === "true" ? true : remote === "false" ? false : undefined;
+
+    // A query is required UNLESS a remote/on-site filter is set — in
+    // that case an empty query means "browse all jobs of this type",
+    // which is a legitimate request (e.g. tapping Remote with nothing typed).
+    if (!q.trim() && remoteFilter === undefined) {
       return res.status(400).json({ error: "Search query is required" });
     }
 
-    let remoteFilter = remote === "true" ? true : remote === "false" ? false : undefined;
     const pageNum = Math.max(1, Number(page) || 1);
 
     // ── Work-type words as the WHOLE query ──────────────────────
