@@ -166,8 +166,26 @@ async function searchJobs({ query = "", location = "", type = "", remote, page =
 }
 
 // ─── Upsert jobs ──────────────────────────────────────────────
+
+// ─── Reject links that point at APIs / raw data instead of a real
+// job page. Users must always land on a human-readable posting.
+function isUserFacingUrl(url) {
+  const u = String(url || "").toLowerCase();
+  if (!/^https?:\/\//.test(u)) return false;
+  // Common API/data endpoint signatures
+  if (/\/api\//.test(u)) return false;
+  if (/api\.[a-z0-9-]+\./.test(u)) return false;      // api.example.com
+  if (/\.json(\?|$)/.test(u)) return false;
+  if (/\/v\d+\//.test(u) && /api/.test(u)) return false;
+  if (/output=csv|format=json/.test(u)) return false;
+  return true;
+}
+
 async function upsertJobs(jobs) {
   if (!jobs || jobs.length === 0) return [];
+  // Drop anything whose apply_url is an API/JSON endpoint rather than a real page
+  jobs = jobs.filter((j) => isUserFacingUrl(j.apply_url));
+  if (jobs.length === 0) return [];
   const res = await axios.post(
     `${REST}/jobs?on_conflict=external_id`,
     jobs,
