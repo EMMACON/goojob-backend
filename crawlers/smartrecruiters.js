@@ -55,8 +55,11 @@ async function crawlSmartRecruitersCompany(slug) {
       const country = p.location?.country || "";
       const loc = [city, country].filter(Boolean).join(", ");
       const remote = !!p.location?.remote || /remote/i.test(p.name || "");
+      // IMPORTANT: p.ref is the API endpoint (returns raw JSON) — never
+      // send users there. Use the human-facing posting page instead.
       const applyUrl =
-        p.ref ||
+        p.postingUrl ||
+        p.applyUrl ||
         `https://jobs.smartrecruiters.com/${slug}/${p.id}`;
       return {
         external_id: `smartrecruiters_${slug}_${p.id}`,
