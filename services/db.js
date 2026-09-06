@@ -230,12 +230,12 @@ async function logClick(jobId, userIp) {
   }
 }
 
-async function getRecentJobs(limit = 24) {
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 24, 50));
-  // Pull a pool of newest jobs, filter to fresh ones, return newest first.
+async function getRecentJobs(limit = 40) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 40, 100));
+  // Pull a larger pool of newest jobs, filter to fresh ones, newest first.
   const res = await axios.get(
-    `${REST}/jobs?order=posted_at.desc&limit=200&select=*`,
-    { headers, timeout: 9000 }
+    `${REST}/jobs?order=posted_at.desc&limit=400&select=*`,
+    { headers, timeout: 12000 }
   );
   const fresh = (res.data || [])
     .filter(isFresh)
