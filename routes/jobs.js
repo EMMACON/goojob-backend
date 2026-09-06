@@ -162,7 +162,7 @@ router.get("/search", async (req, res) => {
  */
 router.get("/recent", async (req, res) => {
   try {
-    const data = await getRecentJobs(24);
+    const data = await getRecentJobs(40);
     res.json({ ...data, jobs: (data.jobs || []).map((j) => ({ ...j, source_type: "direct" })) });
   } catch (err) {
     console.error("[/recent]", err.message);
