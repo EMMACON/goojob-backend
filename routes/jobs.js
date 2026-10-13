@@ -29,7 +29,9 @@ router.get("/search", async (req, res) => {
     // A query is required UNLESS a remote/on-site filter is set — in
     // that case an empty query means "browse all jobs of this type",
     // which is a legitimate request (e.g. tapping Remote with nothing typed).
-    if (!q.trim() && remoteFilter === undefined) {
+    // A location on its own is also a valid browse ("all jobs in London").
+    const locClean = String(location || "").trim();
+    if (!q.trim() && remoteFilter === undefined && !locClean) {
       return res.status(400).json({ error: "Search query is required" });
     }
 
@@ -70,7 +72,10 @@ router.get("/search", async (req, res) => {
     let aggregatorTotal = 0;
     const slotsLeft = PAGE_SIZE - directJobs.length;
 
-    if (slotsLeft > 0) {
+    // Gap-fill sources (Remotive, Adzuna, ...) can't filter by place, so
+    // when a location is set we only show our own location-matched jobs
+    // instead of padding the page with jobs from anywhere in the world.
+    if (slotsLeft > 0 && !locClean) {
       const seen = new Set(
         directJobs.map((j) => `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`)
       );
