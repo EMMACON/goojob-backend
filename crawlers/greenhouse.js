@@ -20,6 +20,22 @@ const CONCURRENCY = 8;          // parallel company fetches
 const DELAY_MS = 250;
 const UA = { "User-Agent": "Goojob/1.0 (+https://goojob.io/bot)" };
 
+// Boards confirmed to return public jobs on 16 Nov 2026. Healthcare and
+// education are included on purpose — the 6-hour quick crawl used to skip
+// Greenhouse entirely, so nurse and teacher roles never landed in the index
+// even when the board was public. The daily sitemap crawl still tries to
+// cover every Greenhouse company; this list is the part that actually runs
+// on a schedule short enough to matter.
+const PRIORITY_BOARDS = [
+  // healthcare (One Medical and Clover Health were posting nurse roles)
+  "onemedical", "cloverhealth", "betterhelp", "honor", "papa",
+  "freenome", "flatironhealth", "natera", "veracyte", "forward",
+  "oscar", "ginkgobioworks",
+  // education / learning
+  "khanacademy", "coursera", "duolingo", "udemy", "datacamp",
+  "swingeducation", "2u", "calm", "peloton",
+];
+
 // Pull all company slugs from the sitemap
 async function getGreenhouseCompanySlugs() {
   console.log("[GREENHOUSE] Fetching sitemap...");
@@ -69,13 +85,13 @@ async function crawlGreenhouseBoard(slug) {
   }
 }
 
-async function runGreenhouseCrawler({ limit = 100000, onProgress } = {}) {
-  const slugs = (await getGreenhouseCompanySlugs()).slice(0, limit);
+async function runGreenhouseCrawler({ limit = 100000, slugs = null, onProgress } = {}) {
+  const list = slugs || (await getGreenhouseCompanySlugs()).slice(0, limit);
   let totalJobs = 0;
   let processed = 0;
 
-  for (let i = 0; i < slugs.length; i += CONCURRENCY) {
-    const batch = slugs.slice(i, i + CONCURRENCY);
+  for (let i = 0; i < list.length; i += CONCURRENCY) {
+    const batch = list.slice(i, i + CONCURRENCY);
     const results = await Promise.all(batch.map((s) => crawlGreenhouseBoard(s)));
 
     for (const jobs of results) {
@@ -87,7 +103,7 @@ async function runGreenhouseCrawler({ limit = 100000, onProgress } = {}) {
     processed += batch.length;
     if (onProgress && processed % 200 === 0) {
       onProgress({ source: "greenhouse", processed, totalJobs });
-      console.log(`[GREENHOUSE] ${processed}/${slugs.length} companies, ${totalJobs} jobs`);
+      console.log(`[GREENHOUSE] ${processed}/${list.length} companies, ${totalJobs} jobs`);
     }
     await new Promise((r) => setTimeout(r, DELAY_MS));
   }
@@ -96,4 +112,4 @@ async function runGreenhouseCrawler({ limit = 100000, onProgress } = {}) {
   return { totalJobs, companiesProcessed: processed };
 }
 
-module.exports = { runGreenhouseCrawler, crawlGreenhouseBoard, getGreenhouseCompanySlugs };
+module.exports = { runGreenhouseCrawler, crawlGreenhouseBoard, getGreenhouseCompanySlugs, PRIORITY_BOARDS };

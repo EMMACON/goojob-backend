@@ -1,10 +1,11 @@
-const { runGreenhouseCrawler } = require("./greenhouse");
+const { runGreenhouseCrawler, PRIORITY_BOARDS } = require("./greenhouse");
 const { runLeverCrawler, discoverNewLeverCompanies } = require("./lever");
 const { runAshbyCrawler } = require("./ashby");
 const { runWorkableCrawler } = require("./workable");
 const { runSmartRecruitersCrawler } = require("./smartrecruiters");
 const { runRecruiteeCrawler } = require("./recruitee");
 const { runManualSheetCrawler } = require("./manual-sheet");
+const { runPersonioCrawler } = require("./personio");
 
 // ─────────────────────────────────────────────────────────────
 // MASTER CRAWLER ORCHESTRATOR (maxed out for maximum coverage)
@@ -38,9 +39,16 @@ async function runFullCrawl({ onProgress } = {}) {
   console.log("\n📋 Crawling Recruitee...");
   summary.recruitee = await runRecruiteeCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
 
+  console.log("\n📋 Crawling Greenhouse priority boards (healthcare, education, learning)...");
+  summary.greenhousePriority = await runGreenhouseCrawler({ slugs: PRIORITY_BOARDS, onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+
+  console.log("\n📋 Crawling Personio...");
+  summary.personio = await runPersonioCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+
   console.log("\n📋 Crawling Greenhouse (ALL companies)...");
   summary.greenhouse = await runGreenhouseCrawler({ limit: 100000, onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
 
+  // Priority Greenhouse boards are inside the full sitemap crawl, so they are not added again.
   const totalJobs =
     (summary.manual?.totalJobs || 0) +
     (summary.ashby?.totalJobs || 0) +
@@ -48,6 +56,7 @@ async function runFullCrawl({ onProgress } = {}) {
     (summary.workable?.totalJobs || 0) +
     (summary.smartrecruiters?.totalJobs || 0) +
     (summary.recruitee?.totalJobs || 0) +
+    (summary.personio?.totalJobs || 0) +
     (summary.greenhouse?.totalJobs || 0);
 
   const duration = Math.round((Date.now() - startTime) / 1000);
@@ -57,14 +66,16 @@ async function runFullCrawl({ onProgress } = {}) {
 }
 
 async function runQuickCrawl() {
-  console.log("⚡ [QUICK CRAWL] Lever + Ashby + Workable + SmartRecruiters + Recruitee...");
-  const [lever, ashby, workable, sr, recruitee, manual] = await Promise.allSettled([
+  console.log("⚡ [QUICK CRAWL] Lever + Ashby + Workable + SmartRecruiters + Recruitee + Greenhouse priority + Personio...");
+  const [lever, ashby, workable, sr, recruitee, manual, greenhouse, personio] = await Promise.allSettled([
     runLeverCrawler(),
     runAshbyCrawler(),
     runWorkableCrawler(),
     runSmartRecruitersCrawler(),
     runRecruiteeCrawler(),
     runManualSheetCrawler(),
+    runGreenhouseCrawler({ slugs: PRIORITY_BOARDS }),
+    runPersonioCrawler(),
   ]);
   return {
     lever: lever.value || { error: lever.reason?.message },
@@ -73,6 +84,8 @@ async function runQuickCrawl() {
     smartrecruiters: sr.value || { error: sr.reason?.message },
     recruitee: recruitee.value || { error: recruitee.reason?.message },
     manual: manual.value || { error: manual.reason?.message },
+    greenhouse: greenhouse.value || { error: greenhouse.reason?.message },
+    personio: personio.value || { error: personio.reason?.message },
   };
 }
 
@@ -83,6 +96,7 @@ async function crawlOne(platform, slug) {
   const { crawlWorkableCompany } = require("./workable");
   const { crawlSmartRecruitersCompany } = require("./smartrecruiters");
   const { crawlRecruiteeCompany } = require("./recruitee");
+  const { crawlPersonioCompany } = require("./personio");
   const { upsertJobs } = require("../services/db");
 
   let jobs = [];
@@ -92,6 +106,7 @@ async function crawlOne(platform, slug) {
   else if (platform === "workable") jobs = await crawlWorkableCompany(slug);
   else if (platform === "smartrecruiters") jobs = await crawlSmartRecruitersCompany(slug);
   else if (platform === "recruitee") jobs = await crawlRecruiteeCompany(slug);
+  else if (platform === "personio") jobs = await crawlPersonioCompany(slug);
   else throw new Error(`Unknown platform: ${platform}`);
 
   if (jobs.length) await upsertJobs(jobs);

@@ -1,153 +1,107 @@
 const express = require("express");
 const router = express.Router();
-const { searchJobs, getJobById, getFeaturedJobs, getRecentJobs, logClick } = require("../services/db");
-const { searchAdzuna, isConfigured: adzunaReady } = require("../services/adzuna");
-const { searchRemoteSources } = require("../services/remote-sources");
-const { resolveBatch } = require("../services/link-resolver");
+const { searchJobs, getJobById, getFeaturedJobs, getRecentJobs, getJobCount, logClick } = require("../services/db");
+const { parseSearchQuery, hasSearchIntent } = require("../services/search");
 
 // ─── Tuning ───────────────────────────────────────────────────
-const PAGE_SIZE = 25;       // jobs shown per page
-const DIRECT_ENOUGH = PAGE_SIZE; // if direct fills the page, skip gap-fill
+const PAGE_SIZE = 25;
 
 /**
- * GET /api/jobs/search?q=...&page=1
+ * GET /api/jobs/search
  *
- * Paginated. Each page returns up to PAGE_SIZE jobs:
- *   1. OUR direct crawled jobs first (always priority, badged Direct)
- *   2. If the page isn't full, top up with remote-native sources
- *      (Remotive/RemoteOK/Arbeitnow), then Adzuna as last resort.
- *   3. Gap-fill jobs are run through the resolver to upgrade them to
- *      real direct company links where possible.
- * Returns `hasMore` so the frontend can show a "Load more" button.
+ * Finds direct-apply jobs already in the index. Matching is whole-word
+ * (with a small set of real variants: accountant/accounting, nurse/nursing).
+ * Title hits outrank company hits. Description-only hits are not results.
+ *
+ * Query parameters — all optional except that at least one of q, location,
+ * type, or remote must narrow the search:
+ *
+ *   q         Free text. Job words are matched on the title and company.
+ *             These words are NOT plain keywords; they change the search:
+ *               remote, wfh, work from home, anywhere  → remote jobs only
+ *               onsite, on-site, in office             → on-site jobs only
+ *               hybrid                                 → title or location says hybrid
+ *               intern, internship                     → internships only
+ *             A known city or country is a location filter, not a keyword.
+ *             "accountant Accra" searches accountant roles in Accra.
+ *             "remote marketing" searches marketing roles that are remote.
+ *   location  City or country. Same filter as a place typed in q.
+ *             A city in q is ignored when location is set explicitly.
+ *   remote    "true" or "false". Wins over remote/onsite words in q.
+ *   type      Full-time | Part-time | Contract | Internship.
+ *   page      Page number, 25 jobs per page. Response includes hasMore.
+ *
+ * Response (existing fields kept; new fields are additive):
+ *   jobs, total, page, pageSize, hasMore, directCount, aggregatorCount,
+ *   upgradedCount, source, parsed, indexSize, freshCount, truncated
+ *
+ * indexSize / freshCount also live at GET /api/jobs/count.
+ * aggregatorCount and upgradedCount stay in the payload for older clients.
+ * Search no longer calls Remotive, RemoteOK, Arbeitnow, Adzuna, or live ATS
+ * resolvers. Those calls ran during the request (multi-second timeouts,
+ * several hosts per company) and were the 2s–12s tail. Almost every
+ * aggregator row was then dropped by the direct-link rule.
+ *
+ * GET /api/jobs/count
+ *   { total, fresh, maxAgeDays, asOf }
+ *   total is every row in the index. fresh is posted within maxAgeDays,
+ *   which is the set search will actually return.
+ *
+ * GET /api/jobs/recent
+ *   Newest jobs for the homepage. At most 3 per company, and the same
+ *   title at one company is returned once with its locations combined.
+ *
+ * GET /api/jobs/featured
+ * GET /api/jobs/:id
+ * POST /api/jobs/:id/click
  */
 router.get("/search", async (req, res) => {
+  const started = Date.now();
   try {
-    let { q = "", location = "", type = "", remote, page = 1 } = req.query;
+    const { q = "", location = "", type = "", remote, page = 1 } = req.query;
+    const parsed = parseSearchQuery({ q, location, type, remote });
 
-    let remoteFilter = remote === "true" ? true : remote === "false" ? false : undefined;
-
-    // A query is required UNLESS a remote/on-site filter is set — in
-    // that case an empty query means "browse all jobs of this type",
-    // which is a legitimate request (e.g. tapping Remote with nothing typed).
-    if (!q.trim() && remoteFilter === undefined) {
+    if (!hasSearchIntent(parsed)) {
       return res.status(400).json({ error: "Search query is required" });
     }
 
     const pageNum = Math.max(1, Number(page) || 1);
+    const [direct, count] = await Promise.all([
+      searchJobs({
+        query: q,
+        location,
+        type,
+        remote,
+        page: pageNum,
+        limit: PAGE_SIZE,
+      }),
+      getJobCount().catch(() => null),
+    ]);
 
-    // ── Work-type words as the WHOLE query ──────────────────────
-    // "Remote" isn't a job title, so a literal keyword search for it
-    // finds nothing even though remote jobs exist. If the entire query
-    // IS a work-type word, treat it as that filter (show ALL jobs of
-    // that type) instead of searching titles for the literal word.
-    const trimmedQ = q.trim().toLowerCase();
-    const workTypeMap = {
-      remote: true, remotely: true, "work from home": true, wfh: true, anywhere: true,
-      onsite: false, "on-site": false, "in office": false, "in-office": false, office: false,
-    };
-    let usedWorkTypeShortcut = false;
-    if (workTypeMap.hasOwnProperty(trimmedQ) && remoteFilter === undefined) {
-      remoteFilter = workTypeMap[trimmedQ];
-      q = "";               // clear the keyword — we want ALL jobs of this type
-      usedWorkTypeShortcut = true;
+    const jobs = (direct.jobs || []).map((job) => (
+      job.source_type ? job : { ...job, source_type: "direct" }
+    ));
+    const total = direct.total || 0;
+    const hasMore = jobs.length >= PAGE_SIZE && pageNum * PAGE_SIZE < total;
+
+    if (Date.now() - started > 1500) {
+      console.error(`[search] slow ${Date.now() - started}ms q=${JSON.stringify(String(q).slice(0, 80))}`);
     }
-
-    // 1) Our direct crawled jobs for this page
-    const direct = await searchJobs({
-      query: q,
-      location,
-      type,
-      remote: remoteFilter,
-      page: pageNum,
-      limit: PAGE_SIZE,
-    });
-
-    let directJobs = (direct.jobs || []).map((j) => ({ ...j, source_type: "direct" }));
-    const directTotal = direct.total || 0;
-
-    // 2) Gap-fill if this page isn't full of direct jobs
-    let aggregatorJobs = [];
-    let aggregatorTotal = 0;
-    const slotsLeft = PAGE_SIZE - directJobs.length;
-
-    if (slotsLeft > 0) {
-      const seen = new Set(
-        directJobs.map((j) => `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`)
-      );
-
-      // Offset gap-fill by how many direct jobs exist beyond this page,
-      // so paging through doesn't repeat the same filler jobs.
-      const directPagesConsumed = directTotal; // total direct across all pages
-      const fillOffset = Math.max(0, (pageNum - 1) * PAGE_SIZE - directPagesConsumed);
-
-      // 2a) Remote-native sources first
-      try {
-        const remoteRes = await searchRemoteSources({
-          query: q,
-          remote: remoteFilter,
-          limit: slotsLeft,
-          offset: fillOffset,
-        });
-        aggregatorTotal += remoteRes.total || 0;
-        for (const j of remoteRes.jobs) {
-          const key = `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            aggregatorJobs.push({ ...j, source_type: "aggregator" });
-          }
-        }
-      } catch (e) {
-        console.error("[remote-sources]", e.message);
-      }
-
-      // 2b) Adzuna only if still room
-      if (adzunaReady() && aggregatorJobs.length < slotsLeft) {
-        const adzRemote = remoteFilter === false ? false : true;
-        const adz = await searchAdzuna({ query: q, remote: adzRemote, page: pageNum, limit: PAGE_SIZE });
-        aggregatorTotal += adz.total || 0;
-        for (const j of (adz.jobs || [])) {
-          const key = `${(j.title || "").toLowerCase()}|${(j.company || "").toLowerCase()}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            aggregatorJobs.push({ ...j, source_type: "aggregator" });
-          }
-        }
-      }
-
-      // Trim to remaining slots, then upgrade to direct links where possible
-      aggregatorJobs = aggregatorJobs.slice(0, slotsLeft);
-      aggregatorJobs = await resolveBatch(aggregatorJobs);
-
-      // DIRECT-ONLY POLICY: keep ONLY jobs that resolved to a real
-      // company link. Anything still pointing at an aggregator
-      // (Adzuna/Remotive/etc.) is dropped — we never show middleman
-      // links. This guarantees every job on the site is direct.
-      aggregatorJobs = aggregatorJobs.filter((j) => j.source_type === "direct");
-    }
-
-    // Everything that survives is now a direct link (crawled OR
-    // resolved-from-aggregator). They all get the "direct" treatment.
-    const upgradedDirect = aggregatorJobs; // already filtered to direct only
-    const jobs = [...directJobs, ...upgradedDirect];
-
-    // HONEST COUNT: report the number of real direct jobs available.
-    // directTotal already reflects post-filter (fresh + relevant) DB jobs.
-    // We add only the upgraded aggregator jobs actually shown this page —
-    // we do NOT count raw aggregator totals, since most get dropped by the
-    // direct-only filter and would inflate the number misleadingly.
-    const grandTotal = directTotal + upgradedDirect.length;
-    const hasMore = directJobs.length >= PAGE_SIZE && (pageNum * PAGE_SIZE) < directTotal;
 
     return res.json({
       jobs,
-      total: grandTotal,
+      total,
       page: pageNum,
       pageSize: PAGE_SIZE,
       hasMore,
       directCount: jobs.length,
       aggregatorCount: 0,
-      upgradedCount: upgradedDirect.length,
+      upgradedCount: 0,
       source: "direct",
+      parsed: direct.parsed || parsed,
+      indexSize: count ? count.total : null,
+      freshCount: count ? count.fresh : null,
+      truncated: Boolean(direct.truncated),
     });
   } catch (err) {
     console.error("[/search]", err.message);
@@ -156,14 +110,36 @@ router.get("/search", async (req, res) => {
 });
 
 /**
+ * GET /api/jobs/count
+ * Index size for a truthful "N jobs" claim. Cached for a few minutes.
+ */
+router.get("/count", async (req, res) => {
+  try {
+    const data = await getJobCount();
+    res.json(data);
+  } catch (err) {
+    console.error("[/count]", err.message);
+    res.status(500).json({ error: "Could not count jobs." });
+  }
+});
+
+/**
  * GET /api/jobs/recent
- * Newest fresh jobs across all categories — shown on the homepage
- * before the user searches anything.
+ * Newest fresh jobs across companies — shown on the homepage
+ * before the user searches anything. Capped per company.
  */
 router.get("/recent", async (req, res) => {
   try {
-    const data = await getRecentJobs(40);
-    res.json({ ...data, jobs: (data.jobs || []).map((j) => ({ ...j, source_type: "direct" })) });
+    const [data, count] = await Promise.all([
+      getRecentJobs(40),
+      getJobCount().catch(() => null),
+    ]);
+    res.json({
+      ...data,
+      jobs: (data.jobs || []).map((job) => ({ ...job, source_type: "direct" })),
+      indexSize: count ? count.total : null,
+      freshCount: count ? count.fresh : null,
+    });
   } catch (err) {
     console.error("[/recent]", err.message);
     res.status(500).json({ error: "Could not load recent jobs." });
