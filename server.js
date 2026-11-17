@@ -7,6 +7,7 @@ const jobsRouter = require("./routes/jobs");
 const crawlerRouter = require("./crawlers/crawler-route");
 const adminRouter = require("./routes/admin");
 const { runQuickCrawl, runFullCrawl } = require("./crawlers/index");
+const { getJobCount } = require("./services/db");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -77,4 +78,6 @@ cron.schedule("0 2 * * *", () => {
 // ─── Start ────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`✅ Goojob running on port ${PORT}`);
+  // Warm the index-size cache so the first search doesn't wait on a count.
+  getJobCount().catch(() => {});
 });
