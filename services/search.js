@@ -1,4 +1,4 @@
-const { fold, lookupPlace, matchesPlace, CITY_PHRASES } = require("./places");
+const { fold, lookupPlace, matchesPlace, CITY_PHRASES, citiesInCountry } = require("./places");
 const { normalizeJob, normalizeEmploymentType } = require("./normalize");
 
 // Equivalence groups. These are whole-word variants, not prefixes.
@@ -194,6 +194,20 @@ function buildJobQuery(parsed, { limit = POOL_LIMIT } = {}) {
     groups.push(orGroup(["title.ilike.*intern*", "type.ilike.*intern*"]));
   }
 
+  const place = lookupPlace(parsed.location);
+  if (place?.kind === "country") {
+    const clauses = [];
+    const name = sqlTerm(place.name);
+    if (name.length >= 4) clauses.push(`location.ilike.*${name}*`);
+    for (const city of citiesInCountry(place.name)) {
+      const cityTerm = sqlTerm(city);
+      if (cityTerm.length >= 5) clauses.push(`location.ilike.*${cityTerm}*`);
+    }
+    clauses.push("location.ilike.*worldwide*");
+    clauses.push("location.ilike.*anywhere*");
+    if (clauses.length) groups.push(orGroup([...new Set(clauses)]));
+  }
+
   if (groups.length === 1) {
     const inner = groups[0].replace(/^or\(/, "").replace(/\)$/, "");
     params.set("or", `(${inner})`);
@@ -203,7 +217,9 @@ function buildJobQuery(parsed, { limit = POOL_LIMIT } = {}) {
 
   if (parsed.remote === false) params.set("remote", "eq.false");
 
-  const place = lookupPlace(parsed.location);
+  const since = new Date(Date.now() - MAX_JOB_AGE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  params.set("posted_at", `gte.${since}`);
+
   if (place?.kind === "city") {
     const city = sqlTerm(place.city);
     if (city.length >= 4) params.set("location", `ilike.*${city}*`);

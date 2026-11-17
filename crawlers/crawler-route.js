@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { runFullCrawl, runQuickCrawl, crawlOne } = require("./index");
+const { runFullCrawl, runQuickCrawl, crawlOne, getCrawlState } = require("./index");
 
 // Admin key middleware
 function requireAdminKey(req, res, next) {
@@ -12,15 +12,22 @@ function requireAdminKey(req, res, next) {
 }
 
 /**
+ * GET /api/crawler/status
+ * Last crawl timestamps. No secrets. Shows whether the in-process cron has run.
+ */
+router.get("/status", (req, res) => {
+  res.json(getCrawlState());
+});
+
+/**
  * POST /api/crawler/full
- * Trigger a full crawl of Greenhouse + Lever + Ashby
- * Takes 30-60 mins. Runs in background, responds immediately.
+ * Verified boards plus a 180-day expiry of rows the product will never show.
+ * Runs in the background.
  */
 router.post("/full", requireAdminKey, (req, res) => {
   res.json({
     message: "Full crawl started in background",
-    note: "Covers Greenhouse (~5000 companies), Lever (~3000), Ashby (~2000)",
-    estimatedTime: "30-60 minutes",
+    note: "Verified Greenhouse, Lever, Ashby, Workable, Workday, Oracle, BambooHR, and employer sitemaps. Removes rows older than 180 days at the end.",
   });
   runFullCrawl().catch((e) => console.error("[FULL CRAWL ERROR]", e.message));
 });
@@ -31,14 +38,14 @@ router.post("/full", requireAdminKey, (req, res) => {
  * This is what the cron job calls every 6 hours
  */
 router.post("/quick", requireAdminKey, (req, res) => {
-  res.json({ message: "Quick crawl started (Lever + Ashby)" });
+  res.json({ message: "Quick crawl started" });
   runQuickCrawl().catch((e) => console.error("[QUICK CRAWL ERROR]", e.message));
 });
 
 /**
  * POST /api/crawler/one
  * Crawl a single company
- * Body: { platform: "lever"|"greenhouse"|"ashby", slug: "linear" }
+ * Body: { platform: "lever"|"greenhouse"|"ashby"|"workday"|"oracle"|"bamboohr"|"sitemap"|"workable"|"personio"|"recruitee", slug }
  */
 router.post("/one", requireAdminKey, async (req, res) => {
   const { platform, slug } = req.body;

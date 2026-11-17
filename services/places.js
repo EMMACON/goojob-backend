@@ -88,10 +88,15 @@ const CA_PROVINCES = new Set(["ab", "bc", "mb", "nb", "nl", "ns", "nt", "nu", "o
 const CITY_LIST = [
   ["accra", "Accra", "Ghana"],
   ["kumasi", "Kumasi", "Ghana"],
+  ["takoradi", "Takoradi", "Ghana"],
+  ["tamale", "Tamale", "Ghana"],
+  ["tema", "Tema", "Ghana"],
   ["lagos", "Lagos", "Nigeria"],
+  ["port harcourt", "Port Harcourt", "Nigeria"],
   ["abuja", "Abuja", "Nigeria"],
   ["nairobi", "Nairobi", "Kenya"],
   ["mombasa", "Mombasa", "Kenya"],
+  ["nanyuki", "Nanyuki", "Kenya"],
   ["cairo", "Cairo", "Egypt"],
   ["johannesburg", "Johannesburg", "South Africa"],
   ["cape town", "Cape Town", "South Africa"],
@@ -236,6 +241,23 @@ for (const [alias, name] of Object.entries(COUNTRY_ALIASES)) {
 
 const CITY_PHRASES = [...CITIES.keys()].filter((k) => k.includes(" ")).sort((a, b) => b.length - a.length);
 
+function citiesInCountry(countryName) {
+  const want = fold(countryName);
+  const cities = [];
+  for (const [, city, country] of CITY_LIST) {
+    if (fold(country) === want && !cities.includes(city)) cities.push(city);
+  }
+  return cities;
+}
+
+function locationHasPlace(location, needle) {
+  const loc = fold(location);
+  const n = fold(needle);
+  if (!n) return false;
+  if (n.length >= 6) return loc.includes(n);
+  return wholeWord(loc, n);
+}
+
 function lookupPlace(raw) {
   const key = fold(raw);
   if (!key) return null;
@@ -267,10 +289,12 @@ function matchesPlace(location, wanted) {
   if (want.length <= 3 && wholeWord(loc, want)) return true;
 
   const place = lookupPlace(want);
-  if (place?.kind === "city") return loc.includes(fold(place.city));
+  if (place?.kind === "city") return locationHasPlace(loc, place.city);
   if (place?.kind === "country") {
     if (loc.includes(fold(place.name))) return true;
     if (place.code && wholeWord(loc, place.code)) return true;
+    if (citiesInCountry(place.name).some((city) => locationHasPlace(loc, city))) return true;
+    if (/\b(worldwide|anywhere)\b/.test(loc)) return true;
     return false;
   }
 
@@ -297,4 +321,6 @@ module.exports = {
   lookupPlace,
   wholeWord,
   matchesPlace,
+  citiesInCountry,
+  locationHasPlace,
 };
