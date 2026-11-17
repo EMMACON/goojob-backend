@@ -122,11 +122,30 @@ async function searchJobs({ query = "", location = "", type = "", remote, page =
   };
 }
 
+const JOB_COLUMNS = [
+  "external_id", "title", "company", "location", "remote", "type", "description",
+  "apply_url", "company_logo", "logo_color", "featured", "source", "posted_at",
+];
+
+function toRow(job) {
+  const row = {};
+  for (const key of JOB_COLUMNS) {
+    if (job[key] !== undefined && job[key] !== null) row[key] = job[key];
+  }
+  if (!row.location) row.location = "";
+  if (row.remote !== true) row.remote = false;
+  if (process.env.JOBS_HAS_LAST_SEEN === "true") {
+    row.last_seen_at = new Date().toISOString();
+  }
+  return row;
+}
+
 async function upsertJobs(jobs) {
   if (!jobs || jobs.length === 0) return [];
   jobs = jobs
     .map((job) => normalizeJob(job))
-    .filter((job) => isUserFacingUrl(job.apply_url));
+    .map((job) => toRow(job))
+    .filter((job) => isUserFacingUrl(job.apply_url) && job.external_id && job.title);
   if (jobs.length === 0) return [];
   const res = await axios.post(
     `${REST}/jobs?on_conflict=external_id`,
@@ -224,6 +243,66 @@ async function getRecentJobs(limit = 40) {
   return { jobs: all.slice(0, safeLimit), total: all.length };
 }
 
+async function listJobsByPrefix(prefix) {
+  if (!/^[a-z0-9_-]+$/i.test(prefix || "")) throw new Error("bad prefix");
+  const rows = [];
+  let offset = 0;
+  for (;;) {
+    const params = new URLSearchParams();
+    params.set("select", "external_id,posted_at");
+    params.set("external_id", `like.${prefix}*`);
+    params.set("limit", "1000");
+    params.set("offset", String(offset));
+    const res = await axios.get(`${REST}/jobs?${params}`, { headers, timeout: 20000 });
+    const data = Array.isArray(res.data) ? res.data : [];
+    rows.push(...data);
+    if (data.length < 1000) break;
+    offset += data.length;
+    if (offset > 40000) break;
+  }
+  return rows;
+}
+
+async function getPostedAtMap(ids) {
+  const map = new Map();
+  const unique = [...new Set((ids || []).filter(Boolean))];
+  for (let i = 0; i < unique.length; i += 40) {
+    const chunk = unique.slice(i, i + 40);
+    const params = new URLSearchParams();
+    params.set("select", "external_id,posted_at");
+    params.set("external_id", `in.(${chunk.join(",")})`);
+    const res = await axios.get(`${REST}/jobs?${params}`, { headers, timeout: 20000 });
+    for (const row of res.data || []) {
+      if (row.external_id && row.posted_at) map.set(row.external_id, row.posted_at);
+    }
+  }
+  return map;
+}
+
+async function deleteExternalIds(ids) {
+  const unique = [...new Set((ids || []).filter((id) => /^[a-z0-9_-]+$/i.test(id)))];
+  for (let i = 0; i < unique.length; i += 40) {
+    const chunk = unique.slice(i, i + 40);
+    const params = new URLSearchParams();
+    params.set("external_id", `in.(${chunk.join(",")})`);
+    await axios.delete(`${REST}/jobs?${params}`, {
+      headers: { ...headers, Prefer: "return=minimal" },
+      timeout: 20000,
+    });
+  }
+  return unique.length;
+}
+
+async function deletePostedBefore(isoDate) {
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(isoDate || "")) throw new Error("bad expiry date");
+  const params = new URLSearchParams();
+  params.set("posted_at", `lt.${isoDate}`);
+  await axios.delete(`${REST}/jobs?${params}`, {
+    headers: { ...headers, Prefer: "return=minimal" },
+    timeout: 30000,
+  });
+}
+
 module.exports = {
   searchJobs,
   upsertJobs,
@@ -232,4 +311,9 @@ module.exports = {
   getRecentJobs,
   getJobCount,
   logClick,
+  listJobsByPrefix,
+  getPostedAtMap,
+  deleteExternalIds,
+  deletePostedBefore,
+  toRow,
 };

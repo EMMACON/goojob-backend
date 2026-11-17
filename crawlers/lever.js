@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { getOk } = require("../services/http-client");
 const { upsertJobs } = require("../services/db");
 
 // ─────────────────────────────────────────────────────────────
@@ -11,8 +12,8 @@ const { upsertJobs } = require("../services/db");
 // as the direct apply URLs — clean, no middleman.
 // ─────────────────────────────────────────────────────────────
 
-const CONCURRENCY = 8;
-const DELAY_MS = 300;
+const CONCURRENCY = 2;
+const DELAY_MS = 1100;
 
 /**
  * Known Lever company slugs.
@@ -73,14 +74,11 @@ const LEVER_COMPANIES = [
  * Crawl a single Lever company via their public JSON API
  */
 async function crawlLeverCompany(slug) {
-  const apiUrl = `https://api.lever.co/v0/postings/${slug}?mode=json`;
+  const apiUrl = `https://api.lever.co/v0/postings/${encodeURIComponent(slug)}?mode=json`;
   try {
-    const { data } = await axios.get(apiUrl, {
-      timeout: 8000,
-      headers: { "User-Agent": "Goojob/1.0 (+https://goojob.io/bot)" },
-    });
+    const { status, data } = await getOk(apiUrl, { timeout: 12000 });
 
-    if (!Array.isArray(data) || data.length === 0) return [];
+    if (status === 404 || !Array.isArray(data) || data.length === 0) return [];
 
     return data.map((job) => ({
       external_id: `lever_${job.id}`,
@@ -101,7 +99,10 @@ async function crawlLeverCompany(slug) {
       featured: false,
     }));
   } catch (err) {
-    return []; // 404 = company not on Lever, skip silently
+    if (err.code !== "ROBOTS" && err.status !== 404) {
+      console.error(`[LEVER] ${slug}: ${err.message}`);
+    }
+    return [];
   }
 }
 

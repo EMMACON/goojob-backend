@@ -1,4 +1,4 @@
-const { runGreenhouseCrawler, PRIORITY_BOARDS } = require("./greenhouse");
+const { runGreenhouseCrawler, verifiedGreenhouseSlugs } = require("./greenhouse");
 const { runLeverCrawler, discoverNewLeverCompanies } = require("./lever");
 const { runAshbyCrawler } = require("./ashby");
 const { runWorkableCrawler } = require("./workable");
@@ -6,87 +6,110 @@ const { runSmartRecruitersCrawler } = require("./smartrecruiters");
 const { runRecruiteeCrawler } = require("./recruitee");
 const { runManualSheetCrawler } = require("./manual-sheet");
 const { runPersonioCrawler } = require("./personio");
+const { runWorkdayCrawler } = require("./workday");
+const { runOracleCrawler } = require("./oracle-cloud");
+const { runBambooHrCrawler } = require("./bamboohr");
+const { runSitemapCrawler } = require("./sitemap-feed");
+const { expireOlderThan } = require("../services/expiry");
 
-// ─────────────────────────────────────────────────────────────
-// MASTER CRAWLER ORCHESTRATOR (maxed out for maximum coverage)
-//   Greenhouse:  ALL companies in sitemap (~5000+)
-//   Lever:       expanded multi-sector list + discovery
-//   Ashby:       expanded multi-sector list
-//   Workable:    NEW — SMB / non-tech / international employers
-// ─────────────────────────────────────────────────────────────
+const crawlState = {
+  running: null,
+  startedAt: null,
+  lastQuickAt: null,
+  lastFullAt: null,
+  lastResult: null,
+  lastError: null,
+  bootAt: null,
+};
 
-async function runFullCrawl({ onProgress } = {}) {
-  console.log("🚀 [MASTER CRAWLER] Starting FULL crawl (maxed)...");
+let inFlight = null;
+
+function getCrawlState() {
+  return {
+    running: crawlState.running,
+    startedAt: crawlState.startedAt,
+    lastQuickAt: crawlState.lastQuickAt,
+    lastFullAt: crawlState.lastFullAt,
+    lastError: crawlState.lastError,
+    bootAt: crawlState.bootAt,
+    lastResult: crawlState.lastResult,
+  };
+}
+
+async function runAll({ depth }) {
+  console.log(`[CRAWL] ${depth} crawl starting`);
   const startTime = Date.now();
   const summary = {};
 
-  console.log("\n📋 Reading manual job sheet...");
-  summary.manual = await runManualSheetCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.manual = await runManualSheetCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.sitemap = await runSitemapCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.workday = await runWorkdayCrawler({ depth }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.oracle = await runOracleCrawler({ depth }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.bamboohr = await runBambooHrCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.personio = await runPersonioCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.ashby = await runAshbyCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.lever = await runLeverCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.workable = await runWorkableCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.smartrecruiters = await runSmartRecruitersCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.recruitee = await runRecruiteeCrawler().catch((e) => ({ error: e.message, totalJobs: 0 }));
+  summary.greenhouse = await runGreenhouseCrawler({ slugs: verifiedGreenhouseSlugs() }).catch((e) => ({ error: e.message, totalJobs: 0 }));
 
-  console.log("\n📋 Crawling Ashby...");
-  summary.ashby = await runAshbyCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+  if (depth === "full") {
+    summary.expired = await expireOlderThan().catch((e) => ({ error: e.message }));
+  }
 
-  console.log("\n📋 [2/4] Crawling Lever...");
-  await discoverNewLeverCompanies().catch(() => []);
-  summary.lever = await runLeverCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+  const totalJobs = Object.values(summary).reduce((sum, row) => sum + (row && row.totalJobs ? row.totalJobs : 0), 0);
+  const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+  console.log(`[CRAWL] ${depth} done in ${durationSeconds}s | fetched ${totalJobs} jobs`);
+  return { summary, totalJobs, durationSeconds, depth };
+}
 
-  console.log("\n📋 Crawling Workable...");
-  summary.workable = await runWorkableCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
+function startCrawl(depth) {
+  if (inFlight) {
+    console.log(`[CRAWL] ${depth} skipped; a crawl is already running`);
+    return inFlight;
+  }
+  crawlState.running = depth;
+  crawlState.startedAt = new Date().toISOString();
+  inFlight = runAll({ depth })
+    .then((result) => {
+      crawlState.lastResult = {
+        depth,
+        totalJobs: result.totalJobs,
+        durationSeconds: result.durationSeconds,
+        counts: Object.fromEntries(Object.entries(result.summary).map(([key, value]) => [key, {
+          totalJobs: value && value.totalJobs,
+          projected: value && value.projected,
+          skipped: value && value.skipped,
+          error: value && value.error,
+        }])),
+      };
+      crawlState.lastError = null;
+      if (depth === "full") crawlState.lastFullAt = new Date().toISOString();
+      else crawlState.lastQuickAt = new Date().toISOString();
+      return result;
+    })
+    .catch((err) => {
+      crawlState.lastError = err.message;
+      throw err;
+    })
+    .finally(() => {
+      crawlState.running = null;
+      inFlight = null;
+    });
+  return inFlight;
+}
 
-  console.log("\n📋 Crawling SmartRecruiters...");
-  summary.smartrecruiters = await runSmartRecruitersCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
-
-  console.log("\n📋 Crawling Recruitee...");
-  summary.recruitee = await runRecruiteeCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
-
-  console.log("\n📋 Crawling Greenhouse priority boards (healthcare, education, learning)...");
-  summary.greenhousePriority = await runGreenhouseCrawler({ slugs: PRIORITY_BOARDS, onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
-
-  console.log("\n📋 Crawling Personio...");
-  summary.personio = await runPersonioCrawler({ onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
-
-  console.log("\n📋 Crawling Greenhouse (ALL companies)...");
-  summary.greenhouse = await runGreenhouseCrawler({ limit: 100000, onProgress }).catch((e) => ({ error: e.message, totalJobs: 0 }));
-
-  // Priority Greenhouse boards are inside the full sitemap crawl, so they are not added again.
-  const totalJobs =
-    (summary.manual?.totalJobs || 0) +
-    (summary.ashby?.totalJobs || 0) +
-    (summary.lever?.totalJobs || 0) +
-    (summary.workable?.totalJobs || 0) +
-    (summary.smartrecruiters?.totalJobs || 0) +
-    (summary.recruitee?.totalJobs || 0) +
-    (summary.personio?.totalJobs || 0) +
-    (summary.greenhouse?.totalJobs || 0);
-
-  const duration = Math.round((Date.now() - startTime) / 1000);
-  console.log(`\n✅ [MASTER CRAWLER] Done in ${duration}s | Total: ${totalJobs} jobs`);
-
-  return { summary, totalJobs, durationSeconds: duration };
+async function runFullCrawl() {
+  return startCrawl("full");
 }
 
 async function runQuickCrawl() {
-  console.log("⚡ [QUICK CRAWL] Lever + Ashby + Workable + SmartRecruiters + Recruitee + Greenhouse priority + Personio...");
-  const [lever, ashby, workable, sr, recruitee, manual, greenhouse, personio] = await Promise.allSettled([
-    runLeverCrawler(),
-    runAshbyCrawler(),
-    runWorkableCrawler(),
-    runSmartRecruitersCrawler(),
-    runRecruiteeCrawler(),
-    runManualSheetCrawler(),
-    runGreenhouseCrawler({ slugs: PRIORITY_BOARDS }),
-    runPersonioCrawler(),
-  ]);
-  return {
-    lever: lever.value || { error: lever.reason?.message },
-    ashby: ashby.value || { error: ashby.reason?.message },
-    workable: workable.value || { error: workable.reason?.message },
-    smartrecruiters: sr.value || { error: sr.reason?.message },
-    recruitee: recruitee.value || { error: recruitee.reason?.message },
-    manual: manual.value || { error: manual.reason?.message },
-    greenhouse: greenhouse.value || { error: greenhouse.reason?.message },
-    personio: personio.value || { error: personio.reason?.message },
-  };
+  return startCrawl("quick");
+}
+
+function noteBootCrawl() {
+  crawlState.bootAt = new Date().toISOString();
 }
 
 async function crawlOne(platform, slug) {
@@ -98,19 +121,48 @@ async function crawlOne(platform, slug) {
   const { crawlRecruiteeCompany } = require("./recruitee");
   const { crawlPersonioCompany } = require("./personio");
   const { upsertJobs } = require("../services/db");
+  const { loadBoards } = require("../services/boards");
 
   let jobs = [];
-  if (platform === "greenhouse") jobs = await crawlGreenhouseBoard(slug);
+  if (platform === "greenhouse") jobs = (await crawlGreenhouseBoard(slug)).jobs || [];
   else if (platform === "lever") jobs = await crawlLeverCompany(slug);
   else if (platform === "ashby") jobs = await crawlAshbyCompany(slug);
   else if (platform === "workable") jobs = await crawlWorkableCompany(slug);
-  else if (platform === "smartrecruiters") jobs = await crawlSmartRecruitersCompany(slug);
-  else if (platform === "recruitee") jobs = await crawlRecruiteeCompany(slug);
+  else if (platform === "smartrecruiters") {
+    const verdict = await require("../services/robots").robotsFor(`https://api.smartrecruiters.com/v1/companies/${slug}/postings`);
+    if (!verdict.allowed) throw new Error("robots.txt disallows the SmartRecruiters API");
+    jobs = await crawlSmartRecruitersCompany(slug);
+  } else if (platform === "recruitee") jobs = await crawlRecruiteeCompany(slug);
   else if (platform === "personio") jobs = await crawlPersonioCompany(slug);
-  else throw new Error(`Unknown platform: ${platform}`);
+  else if (platform === "workday") {
+    const board = loadBoards().workday.find((item) => item.tenant === slug || item.company.toLowerCase() === String(slug).toLowerCase());
+    if (!board) throw new Error(`No verified Workday board for ${slug}`);
+    const result = await require("./workday").fetchWorkdayBoard(board, { depth: "quick" });
+    jobs = result.jobs;
+  } else if (platform === "oracle") {
+    const board = loadBoards().oracle.find((item) => item.key === slug);
+    if (!board) throw new Error(`No verified Oracle board for ${slug}`);
+    const result = await require("./oracle-cloud").fetchOracleBoard(board, { depth: "quick" });
+    jobs = result.jobs;
+  } else if (platform === "bamboohr") {
+    const result = await require("./bamboohr").fetchBambooCompany(slug);
+    jobs = result.jobs;
+  } else if (platform === "sitemap") {
+    const feed = loadBoards().sitemaps.find((item) => item.key === slug);
+    if (!feed) throw new Error(`No sitemap feed for ${slug}`);
+    const result = await require("./sitemap-feed").fetchSitemapFeed(feed);
+    jobs = result.jobs;
+  } else throw new Error(`Unknown platform: ${platform}`);
 
   if (jobs.length) await upsertJobs(jobs);
   return { platform, slug, count: jobs.length };
 }
 
-module.exports = { runFullCrawl, runQuickCrawl, crawlOne };
+module.exports = {
+  runFullCrawl,
+  runQuickCrawl,
+  crawlOne,
+  getCrawlState,
+  noteBootCrawl,
+  discoverNewLeverCompanies,
+};

@@ -6,7 +6,7 @@ const cron = require("node-cron");
 const jobsRouter = require("./routes/jobs");
 const crawlerRouter = require("./crawlers/crawler-route");
 const adminRouter = require("./routes/admin");
-const { runQuickCrawl, runFullCrawl } = require("./crawlers/index");
+const { runQuickCrawl, runFullCrawl, noteBootCrawl } = require("./crawlers/index");
 const { getJobCount } = require("./services/db");
 
 const app = express();
@@ -66,13 +66,16 @@ app.get("/", (req, res) => res.json({ status: "Goojob API 🚀" }));
 app.get("/health", (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
 // ─── Cron Schedule ────────────────────────────────────────────
+// In-process cron. A Railway restart used to wait up to six hours for the
+// next tick, and a second crawl could start while the first was still going.
+// The lock lives in the crawler. Boot runs one quick crawl unless opted out.
 cron.schedule("0 */6 * * *", () => {
   console.log("[CRON] Quick crawl starting...");
-  runQuickCrawl().catch(console.error);
+  runQuickCrawl().catch((err) => console.error("[CRON] quick", err.message));
 });
 cron.schedule("0 2 * * *", () => {
   console.log("[CRON] Full crawl starting...");
-  runFullCrawl().catch(console.error);
+  runFullCrawl().catch((err) => console.error("[CRON] full", err.message));
 });
 
 // ─── Start ────────────────────────────────────────────────────
@@ -80,4 +83,11 @@ app.listen(PORT, () => {
   console.log(`✅ Goojob running on port ${PORT}`);
   // Warm the index-size cache so the first search doesn't wait on a count.
   getJobCount().catch(() => {});
+  if (process.env.CRAWL_ON_BOOT !== "false") {
+    noteBootCrawl();
+    setTimeout(() => {
+      console.log("[CRON] Boot crawl starting");
+      runQuickCrawl().catch((err) => console.error("[CRON] boot", err.message));
+    }, 20000);
+  }
 });

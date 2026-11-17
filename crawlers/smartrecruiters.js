@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { robotsFor } = require("../services/robots");
 const { upsertJobs } = require("../services/db");
 
 // ─────────────────────────────────────────────────────────────
@@ -81,6 +82,11 @@ async function crawlSmartRecruitersCompany(slug) {
 }
 
 async function runSmartRecruitersCrawler({ slugs = SR_COMPANIES, onProgress } = {}) {
+  const verdict = await robotsFor("https://api.smartrecruiters.com/v1/companies/accor/postings");
+  if (!verdict.allowed) {
+    console.error("[SMARTRECRUITERS] skipped: api.smartrecruiters.com/robots.txt disallows this crawler. Accor is read from its own vacancies sitemap instead.");
+    return { totalJobs: 0, companiesProcessed: 0, skipped: true, reason: "robots.txt disallows api.smartrecruiters.com" };
+  }
   let totalJobs = 0;
   let processed = 0;
 

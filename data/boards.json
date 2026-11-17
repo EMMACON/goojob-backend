@@ -1,0 +1,381 @@
+{
+  "verifiedOn": "2026-11-17",
+  "notes": "Board tokens were checked against each employer's public JSON or sitemap on 17 Nov 2026. apply_url is the employer career site or the employer's ATS posting. SmartRecruiters' Posting API is not listed: api.smartrecruiters.com/robots.txt disallows every agent except LinkedInBot.",
+  "greenhouse": [
+    "accelschools",
+    "achievementfirst",
+    "agibank",
+    "airbnb",
+    "alphapublicschools",
+    "alxafrica",
+    "ambercharterschools",
+    "ayahealthcare",
+    "bethesdahealthgroup",
+    "betterhelp",
+    "brex",
+    "c6bank",
+    "centriahealthcare",
+    "cloverhealth",
+    "collegetrack",
+    "coursera",
+    "crossriverbank",
+    "databricks",
+    "datacamp",
+    "day1academies",
+    "duolingo",
+    "figma",
+    "flatironhealth",
+    "freenome",
+    "gitlab",
+    "gusto",
+    "honor",
+    "instacart",
+    "jumia",
+    "moniepoint",
+    "natera",
+    "newsela",
+    "onemedical",
+    "oscar",
+    "peloton",
+    "stripe",
+    "sweetgreen",
+    "swordhealth",
+    "talkspace",
+    "toast"
+  ],
+  "workday": [
+    {
+      "company": "AB InBev",
+      "host": "abinbev.wd1.myworkdayjobs.com",
+      "tenant": "abinbev",
+      "site": "eur",
+      "focus": [
+        "accountant"
+      ]
+    },
+    {
+      "company": "AdventHealth",
+      "host": "adventhealth.wd12.myworkdayjobs.com",
+      "tenant": "adventhealth",
+      "site": "ah_external_career_site",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "American Red Cross",
+      "host": "americanredcross.wd1.myworkdayjobs.com",
+      "tenant": "americanredcross",
+      "site": "american_red_cross_careers",
+      "focus": []
+    },
+    {
+      "company": "Associated Bank",
+      "host": "associatedbank.wd1.myworkdayjobs.com",
+      "tenant": "associatedbank",
+      "site": "external_careers",
+      "focus": [
+        "accountant"
+      ]
+    },
+    {
+      "company": "Cleveland Clinic",
+      "host": "ccf.wd1.myworkdayjobs.com",
+      "tenant": "ccf",
+      "site": "clevelandcliniccareers",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "Carilion Clinic",
+      "host": "carilionclinic.wd12.myworkdayjobs.com",
+      "tenant": "carilionclinic",
+      "site": "external_careers",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "Chevron",
+      "host": "chevron.wd5.myworkdayjobs.com",
+      "tenant": "chevron",
+      "site": "jobs",
+      "focus": []
+    },
+    {
+      "company": "Absa",
+      "host": "absa.wd3.myworkdayjobs.com",
+      "tenant": "absa",
+      "site": "absacareersite",
+      "focus": [
+        "africa",
+        "accountant"
+      ]
+    },
+    {
+      "company": "Banner Health",
+      "host": "bannerhealth.wd108.myworkdayjobs.com",
+      "tenant": "bannerhealth",
+      "site": "careers",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "Choice Hotels",
+      "host": "choicehotels.wd5.myworkdayjobs.com",
+      "tenant": "choicehotels",
+      "site": "external",
+      "focus": []
+    },
+    {
+      "company": "Cleveland Metropolitan School District",
+      "host": "clevelandmetroschools.wd1.myworkdayjobs.com",
+      "tenant": "clevelandmetroschools",
+      "site": "jobs",
+      "focus": [
+        "teacher"
+      ]
+    },
+    {
+      "company": "Drury Hotels",
+      "host": "druryhotels.wd5.myworkdayjobs.com",
+      "tenant": "druryhotels",
+      "site": "druryjobs",
+      "focus": []
+    },
+    {
+      "company": "FHI 360",
+      "host": "fhi.wd1.myworkdayjobs.com",
+      "tenant": "fhi",
+      "site": "fhi_360_external_career_portal",
+      "focus": [
+        "africa"
+      ]
+    },
+    {
+      "company": "Holland Hospital",
+      "host": "hollandhospital.wd1.myworkdayjobs.com",
+      "tenant": "hollandhospital",
+      "site": "external",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "Commerce Bank",
+      "host": "commercebank.wd1.myworkdayjobs.com",
+      "tenant": "commercebank",
+      "site": "commercejobs",
+      "focus": [
+        "accountant"
+      ]
+    },
+    {
+      "company": "Diageo",
+      "host": "diageo.wd3.myworkdayjobs.com",
+      "tenant": "diageo",
+      "site": "diageo_careers",
+      "focus": [
+        "africa",
+        "accountant"
+      ]
+    },
+    {
+      "company": "FirstRand",
+      "host": "firstrand.wd3.myworkdayjobs.com",
+      "tenant": "firstrand",
+      "site": "frb",
+      "focus": [
+        "africa"
+      ]
+    },
+    {
+      "company": "Host Hotels & Resorts",
+      "host": "hosthotels.wd5.myworkdayjobs.com",
+      "tenant": "hosthotels",
+      "site": "hosthotels",
+      "focus": []
+    },
+    {
+      "company": "Huntington Hospital",
+      "host": "huntingtonhospital.wd5.myworkdayjobs.com",
+      "tenant": "huntingtonhospital",
+      "site": "huntingtonhospitalcareers",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "International Monetary Fund",
+      "host": "imf.wd5.myworkdayjobs.com",
+      "tenant": "imf",
+      "site": "imf",
+      "focus": [
+        "africa"
+      ]
+    },
+    {
+      "company": "Loews Hotels",
+      "host": "loewshotels.wd5.myworkdayjobs.com",
+      "tenant": "loewshotels",
+      "site": "loewshotels",
+      "focus": []
+    },
+    {
+      "company": "KeyBank",
+      "host": "keybank.wd5.myworkdayjobs.com",
+      "tenant": "keybank",
+      "site": "external_career_site",
+      "focus": [
+        "accountant"
+      ]
+    },
+    {
+      "company": "Mercy",
+      "host": "mercy.wd1.myworkdayjobs.com",
+      "tenant": "mercy",
+      "site": "mercycareers",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "Mass General Brigham",
+      "host": "massgeneralbrigham.wd1.myworkdayjobs.com",
+      "tenant": "massgeneralbrigham",
+      "site": "mgbexternal",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "Orange",
+      "host": "orange.wd3.myworkdayjobs.com",
+      "tenant": "orange",
+      "site": "orange_career",
+      "focus": []
+    },
+    {
+      "company": "PwC",
+      "host": "pwc.wd3.myworkdayjobs.com",
+      "tenant": "pwc",
+      "site": "crm_experienced_careers_site",
+      "focus": [
+        "accountant"
+      ]
+    },
+    {
+      "company": "Trinity Health",
+      "host": "trinityhealth.wd1.myworkdayjobs.com",
+      "tenant": "trinityhealth",
+      "site": "jobs",
+      "focus": [
+        "nurse"
+      ]
+    },
+    {
+      "company": "Shell",
+      "host": "shell.wd3.myworkdayjobs.com",
+      "tenant": "shell",
+      "site": "shellcareers",
+      "focus": [
+        "africa"
+      ]
+    },
+    {
+      "company": "Elavon",
+      "host": "usbank.wd1.myworkdayjobs.com",
+      "tenant": "usbank",
+      "site": "elavon_careers",
+      "focus": []
+    },
+    {
+      "company": "Unilever",
+      "host": "unilever.wd3.myworkdayjobs.com",
+      "tenant": "unilever",
+      "site": "unilever_experienced_professionals",
+      "focus": [
+        "africa",
+        "accountant"
+      ]
+    },
+    {
+      "company": "Old Mutual",
+      "host": "oldmutual.wd3.myworkdayjobs.com",
+      "tenant": "oldmutual",
+      "site": "Old_Mutual_Careers",
+      "focus": [
+        "africa",
+        "accountant"
+      ]
+    }
+  ],
+  "oracle": [
+    {
+      "key": "mtn",
+      "company": "MTN",
+      "host": "ehle.fa.em2.oraclecloud.com",
+      "siteNumber": "CX_1",
+      "sitePath": "CX_1",
+      "focus": [
+        "africa"
+      ]
+    },
+    {
+      "key": "hilton",
+      "company": "Hilton",
+      "host": "efet.fa.us2.oraclecloud.com",
+      "siteNumber": "CX_1",
+      "sitePath": "CX_1",
+      "focus": [
+        "hospitality"
+      ]
+    },
+    {
+      "key": "marriott",
+      "company": "Marriott",
+      "host": "ejwl.fa.us2.oraclecloud.com",
+      "siteNumber": "CX",
+      "sitePath": "CX",
+      "focus": [
+        "hospitality",
+        "africa"
+      ]
+    },
+    {
+      "key": "mayo",
+      "company": "Mayo Clinic",
+      "host": "fa-euwp-saasfaprod1.fa.ocs.oraclecloud.com",
+      "siteNumber": "CX_1",
+      "sitePath": "CX_1",
+      "focus": [
+        "nurse"
+      ]
+    }
+  ],
+  "bamboohr": [
+    "teachingattherightlevel",
+    "marybeggclinic",
+    "discoverafricagroup",
+    "navinurses",
+    "doctorshospital",
+    "alnafrica",
+    "natcarbonafrica",
+    "childrenshospitalfoundation",
+    "hcchospital",
+    "africapractice",
+    "westafricablue",
+    "thinkglobalschool",
+    "greenschool"
+  ],
+  "sitemaps": [
+    {
+      "key": "accor",
+      "company": "Accor",
+      "sitemap": "https://careers.accor.com/vacanciessitemap.xml",
+      "parser": "accor"
+    }
+  ]
+}
